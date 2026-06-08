@@ -1,0 +1,108 @@
+/**
+ * Turn.js翻页效果样式
+ * 基于翻页效果.html的实现
+ */
+
+#turn-js-magazine {
+    width: 100%;
+    height: 100%;
+    position: relative;
+    overflow: hidden;
+}
+
+#turn-js-pages {
+    width: 100%;
+    height: 100%;
+    position: relative;
+    z-index: 1;
+}
+
+#turn-js-content {
+    height: 0;
+    overflow: hidden;
+    width: 100%;
+}
+
+#turn-js-content-text {
+    width: 100%;
+    white-space: pre-wrap;
+    box-sizing: border-box;
+    padding: 0 10px;
+}
+
+#turn-js-alert {
+    position: absolute;
+    bottom: 40px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.6);
+    border-radius: 4px;
+    color: #fff;
+    z-index: 10;
+    font-size: 12px;
+    padding: 6px 10px;
+    display: none;
+}
+
+/* Turn.js页面样式 */
+.turn-page {
+    background-color: white;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+    padding: 20px;
+    box-sizing: border-box;
+    overflow: hidden;
+    position: relative;
+}
+
+/* Turn.js自定义样式 */
+.turn-page-wrapper {
+    perspective: 2000px;
+    position: relative;
+    width: 100%;
+    height: 100%;
+}
+
+.turn-page {
+    background-color: white;
+    background-size: 100% 100%;
+}
+
+.turn-page.odd {
+    background: linear-gradient(to right, #fff 95%, #ddd 100%);
+}
+
+.turn-page.even {
+    background: linear-gradient(to left, #fff 95%, #ddd 100%);
+}
+
+/* 翻页动画优化 */
+.turn-page.turn-page-1 {
+    background-color: white;
+}
+
+.turn-page.turn-page-2 {
+    background-color: white;
+}
+
+/* 翻页效果阴影 */
+.turn-page .shadow {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(to right, rgba(0, 0, 0, 0.2) 0%, rgba(0, 0, 0, 0) 100%);
+    z-index: 1;
+    pointer-events: none;
+}
+
+.turn-page .shadow2 {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(to left, rgba(0, 0, 0, 0.2) 0%, rgba(0, 0, 0, 0) 100%);
+    z-index: 1;
+    pointer-events: none;
+}

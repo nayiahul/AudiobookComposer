@@ -1,0 +1,16 @@
+__pycache__/
+.venv/
+.kiro/
+*.pyc
+*.pyo
+.DS_Store
+app.log
+video_generation.log
+uploads/
+outputs/
+temp/
+screenshots/
+*.mp4
+bak/
+config.json
+电子书/*/配置信息/config.json

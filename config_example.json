@@ -1,0 +1,10 @@
+{
+  "deepseek": {
+    "api_key": "your_deepseek_api_key_here",
+    "base_url": "https://api.deepseek.com",
+    "default_model": "deepseek-chat",
+    "enable_deepthink": true,
+    "timeout": 120,
+    "max_retries": 3
+  }
+}

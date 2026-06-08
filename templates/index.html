@@ -1,0 +1,1675 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>有声书制作工具</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        /* Custom styles for page layout */
+        .step-section {
+            display: none;
+        }
+        .step-section.active {
+            display: block;
+        }
+        
+        /* Transition effect animations */
+        @keyframes fadeOut {
+            from { opacity: 1; }
+            to { opacity: 0; }
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        @keyframes slideOut {
+            from { transform: translateX(0); }
+            to { transform: translateX(-100%); }
+        }
+        
+        @keyframes slideIn {
+            from { transform: translateX(100%); }
+            to { transform: translateX(0); }
+        }
+        
+        @keyframes flipOut {
+            from { transform: rotateY(0deg); }
+            to { transform: rotateY(-90deg); }
+        }
+        
+        @keyframes flipIn {
+            from { transform: rotateY(90deg); }
+            to { transform: rotateY(0deg); }
+        }
+
+        /* Book page styles */
+        .book-page {
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.1);
+            background: linear-gradient(to right, #f8f8f8, #ffffff, #f8f8f8);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .book-page::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: repeating-linear-gradient(
+                90deg,
+                transparent,
+                transparent 2px,
+                rgba(0,0,0,0.03) 2px,
+                rgba(0,0,0,0.03) 4px
+            );
+            pointer-events: none;
+        }
+
+        .page-content {
+            text-align: center;
+            padding: 20px;
+            z-index: 1;
+            position: relative;
+        }
+
+        .page-number {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 10px;
+            font-style: italic;
+        }
+
+        .sample-text {
+            font-size: 16px;
+            color: #444;
+            line-height: 1.6;
+            font-family: 'Microsoft YaHei', 'SimSun', serif;
+        }
+
+        .page-flip-overlay {
+            box-shadow: -5px 0 15px rgba(0,0,0,0.3);
+            background: linear-gradient(90deg, #f8f8f8, #ffffff, #f0f0f0);
+        }
+
+        .page-flip-overlay::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: repeating-linear-gradient(
+                90deg,
+                transparent,
+                transparent 2px,
+                rgba(0,0,0,0.03) 2px,
+                rgba(0,0,0,0.03) 4px
+            );
+            pointer-events: none;
+        }
+
+        /* Book opening animation */
+        @keyframes bookOpen {
+            0% {
+                transform: rotateY(-30deg);
+            }
+            100% {
+                transform: rotateY(0deg);
+            }
+        }
+
+        /* Page turn animation */
+        @keyframes pageTurn {
+            0% {
+                transform: rotateY(0deg);
+                z-index: 5;
+            }
+            50% {
+                transform: rotateY(-90deg);
+                z-index: 10;
+            }
+            100% {
+                transform: rotateY(-180deg);
+                z-index: 1;
+            }
+        }
+
+        /* Page transition effects for two-page spread */
+        .book-page.turn-effect {
+            animation: pageTurn 1.5s ease-in-out;
+        }
+
+        .book-container {
+            animation: bookOpen 1s ease-out;
+            transform-style: preserve-3d;
+        }
+
+        /* Streamlit-like tab styles */
+        .streamlit-tabs {
+            border-bottom: 1px solid #e0e0e0;
+            margin-bottom: 1.5rem;
+        }
+        
+        .streamlit-tab-list {
+            display: flex;
+            gap: 0;
+            margin: 0;
+            padding: 0;
+            list-style: none;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        
+        .streamlit-tab {
+            position: relative;
+            padding: 0.75rem 1.5rem;
+            margin: 0;
+            background-color: transparent;
+            border: none;
+            color: #666;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border-bottom: 2px solid transparent;
+        }
+        
+        .streamlit-tab:hover {
+            color: #333;
+            background-color: rgba(0, 0, 0, 0.02);
+        }
+        
+        .streamlit-tab.active {
+            color: #0066cc;
+            border-bottom-color: #0066cc;
+            background-color: rgba(0, 102, 204, 0.05);
+        }
+        
+        .streamlit-tab.active::after {
+            content: '';
+            position: absolute;
+            bottom: -1px;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background-color: #0066cc;
+        }
+        
+        .streamlit-tab-content {
+            padding: 1.5rem 0;
+        }
+        
+        .streamlit-tab-pane {
+            display: none;
+        }
+        
+        .streamlit-tab-pane.active {
+            display: block;
+        }
+    </style>
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/turn-js-page-effect.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/book-page-turn-effect.css') }}" rel="stylesheet">
+    <!-- PDF.js library for PDF preview -->
+    <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.4.120/build/pdf.min.js"></script>
+    <!-- jQuery and Turn.js libraries -->
+    <script src="https://code.jquery.com/jquery-3.3.1.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/turn.js@4.1.0/turn.min.js"></script>
+    <!-- Socket.IO client library -->
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+</head>
+<body>
+    <div class="container-fluid">
+        <header class="bg-primary text-white p-4 mb-4">
+            <div class="row align-items-center">
+                <div class="col">
+                    <h1 class="h3 mb-0">
+                        <i class="bi bi-camera-video me-2"></i>
+                        有声书制作工具
+                    </h1>
+                    <p class="mb-0 opacity-75">将原始文本、音频和字幕文件合成为有声书视频</p>
+                </div>
+                <div class="col-auto">
+                    <div id="ffmpeg-status" class="d-flex align-items-center">
+                        <span class="badge bg-secondary me-2">检查FFmpeg...</span>
+                        <div class="spinner-border spinner-border-sm text-light" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Navigation Menu -->
+            <nav class="navbar navbar-expand-lg navbar-dark bg-primary mt-3 pt-0">
+                <div class="container-fluid">
+                    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+                        <span class="navbar-toggler-icon"></span>
+                    </button>
+                    <div class="collapse navbar-collapse" id="navbarNav">
+                        <ul class="navbar-nav">
+                            <li class="nav-item">
+                                <a class="nav-link active" href="#" data-section="upload-section">
+                                    <i class="bi bi-upload me-1"></i>上传文件
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link" href="#" data-section="subtitle-extraction-section" id="nav-subtitle-extraction">
+                                    <i class="bi bi-magic me-1"></i>字幕提取
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link" href="#" data-section="timing-section" id="nav-timing">
+                                    <i class="bi bi-file-earmark-text me-1"></i>页面设置
+                                </a>
+                            </li>
+
+                            <li class="nav-item">
+                                <a class="nav-link" href="#" data-section="video-settings-section" id="nav-video-settings">
+                                    <i class="bi bi-gear me-1"></i>视频设置
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link" href="#" data-section="create-section" id="nav-create">
+                                    <i class="bi bi-play-circle me-1"></i>创建视频
+                                </a>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </nav>
+        </header>
+
+        <main>
+            <!-- Step 1: File Upload -->
+            <section id="upload-section" class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-upload me-2"></i>
+                        第1步：上传文件
+                    </h5>
+                </div>
+                <div class="card-body position-relative">
+                    <div class="row">
+                        <div class="col">
+                            <div class="upload-area" data-type="pdf">
+                                <i class="bi bi-file-earmark-pdf text-danger" style="font-size: 2rem;"></i>
+                                <h6>有声书原文</h6>
+                                <p class="text-muted small">选择有声书原文文本</p>
+                                <div class="upload-info"></div>
+                            </div>
+                        </div>
+                        <div class="col">
+                            <div class="upload-area" data-type="audio">
+                                <i class="bi bi-file-earmark-music text-success" style="font-size: 2rem;"></i>
+                                <h6>音频文件</h6>
+                                <p class="text-muted small">M4A、MP3、WAV</p>
+                                <div class="upload-info"></div>
+                            </div>
+                        </div>
+                        <div class="col">
+                            <div class="upload-area" data-type="subs" id="subs-upload-area">
+                                <i class="bi bi-file-earmark-text text-primary" style="font-size: 2rem;"></i>
+                                <h6>字幕文件</h6>
+                                <p class="text-muted small">SRT格式</p>
+                                <div class="upload-info"></div>
+                                <!-- 悬浮预览窗体 -->
+                                <div id="subs-upload-hover-preview" class="position-fixed top-0 start-0 mt-2 p-3 bg-white border rounded shadow" style="display: none; z-index: 100000 !important; width: 400px; max-height: 300px;">
+                                    <h6 class="mb-2">字幕预览</h6>
+                                    <pre id="subs-upload-hover-preview-element" style="width: 100%; height: 250px; overflow-y: auto; font-family: monospace; font-size: 12px; text-align: left; white-space: pre-wrap;"></pre>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col">
+                            <div class="upload-area" data-type="config" id="config-upload-area">
+                                <i class="bi bi-file-earmark-code text-warning" style="font-size: 2rem;"></i>
+                                <h6>配置文件</h6>
+                                <p class="text-muted small">自动检测</p>
+                                <div class="upload-info"></div>
+                                <!-- 悬浮预览窗体 -->
+                                <div id="config-upload-hover-preview" class="position-fixed top-0 start-0 mt-2 p-3 bg-white border rounded shadow" style="display: none; z-index: 100000 !important; width: 400px; height: 300px;">
+                                    <h6 class="mb-2">配置预览</h6>
+                                    <pre id="config-upload-hover-preview-element" style="width: 100%; height: 250px; overflow-y: auto; font-family: monospace; font-size: 12px; text-align: left; white-space: pre-wrap;"></pre>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col">
+                            <div class="upload-area" data-type="video" id="video-upload-area">
+                                <i class="bi bi-file-earmark-play text-danger" style="font-size: 2rem;"></i>
+                                <h6>视频文件</h6>
+                                <p class="text-muted small">自动检测</p>
+                                <div class="upload-info"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <input type="file" id="file-input" multiple accept=".pdf,.m4a,.mp3,.wav,.srt" style="display: none;">
+                    <div class="mt-3">
+                        <span id="upload-status" class="ms-3"></span>
+                    </div>
+                    
+                    <!-- 字幕校验区域 - 默认显示 -->
+                    <div id="subtitle-validation-section" class="mt-4">
+                        <div class="card border-info">
+                            <div class="card-header bg-info bg-opacity-10">
+                                <h6 class="mb-0">
+                                    <i class="bi bi-check2-circle me-2"></i>字幕格式校验
+                                </h6>
+                            </div>
+                            <div class="card-body">
+                                <div id="subtitle-validation-ready" class="d-flex justify-content-between align-items-center mb-3">
+                                    <div>
+                                        <p class="mb-1 text-muted small">检查字幕时间轴格式是否符合标准（毫秒必须为3位数字）</p>
+                                    </div>
+                                    <div>
+                                        <button id="validate-subtitle-btn" class="btn btn-info btn-sm me-2">
+                                            <i class="bi bi-check-circle me-1"></i>校验字幕
+                                        </button>
+                                        <button id="fix-subtitle-btn" class="btn btn-warning btn-sm" style="display: none;">
+                                            <i class="bi bi-wrench me-1"></i>修复并保存
+                                        </button>
+                                    </div>
+                                </div>
+                                <div id="subtitle-validation-result" style="display: none;">
+                                    <div class="alert mb-0" role="alert">
+                                        <div id="validation-message"></div>
+                                        <div id="validation-details" class="mt-2 small"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </section>
+
+            <!-- Subtitle Extraction Section -->
+            <section id="subtitle-extraction-section" class="card mb-4 border-0 shadow-sm" style="display: none;">
+                <div class="card-header bg-white border-0 pt-4 pb-0">
+                    <div class="d-flex align-items-center justify-content-between">
+                        <div>
+                            <h5 class="card-title mb-1 text-dark fw-bold">
+                                <i class="bi bi-magic me-2 text-primary"></i>
+                                字幕提取
+                            </h5>
+                            <p class="text-muted mb-0 small">使用AI技术从音频文件中提取高质量字幕</p>
+                        </div>
+                        <div class="badge bg-primary bg-opacity-10 text-primary px-3 py-2">
+                            <i class="bi bi-cpu me-1"></i>Whisper AI
+                        </div>
+                    </div>
+                </div>
+                <div class="card-body pt-3">
+                    <!-- 提取设置区域 -->
+                    <div class="card border-0 bg-light mb-4">
+                        <div class="card-body p-4">
+                            <h6 class="card-subtitle mb-4 text-dark fw-semibold">
+                                <i class="bi bi-sliders me-2"></i>提取设置
+                            </h6>
+                            
+                            <div class="row g-4">
+                                <!-- 模型选择 -->
+                                <div class="col-md-6">
+                                    <label for="whisper-model-select" class="form-label fw-bold text-dark mb-3">
+                                        <i class="bi bi-cpu me-1 text-primary"></i>选择模型
+                                    </label>
+                                    <div class="model-selection">
+                                        <select id="whisper-model-select" class="form-select form-select-lg border-0 shadow-sm">
+                                            <option value="tiny">Tiny (39MB) - 极速模式</option>
+                                            <option value="base" selected>Base (74MB) - 推荐使用</option>
+                                            <option value="small">Small (244MB) - 高精度</option>
+                                            <option value="medium">Medium (769MB) - 专业级</option>
+                                            <option value="large">Large (1550MB) - 最高精度</option>
+                                            <option value="large-v3-turbo">Large-v3-Turbo (779MB) - 最新版</option>
+                                        </select>
+                                        <div class="form-text mt-2">
+                                            <i class="bi bi-info-circle me-1"></i>
+                                            中文音频推荐使用 Base 或 Small 模型
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- 语言选择 -->
+                                <div class="col-md-6">
+                                    <label for="audio-language-select" class="form-label fw-bold text-dark mb-3">
+                                        <i class="bi bi-translate me-1 text-primary"></i>音频语言
+                                    </label>
+                                    <select id="audio-language-select" class="form-select form-select-lg border-0 shadow-sm">
+                                        <option value="auto">🌐 自动检测</option>
+                                        <option value="zh" selected>🇨🇳 中文</option>
+                                        <option value="en">🇺🇸 英文</option>
+                                        <option value="ja">🇯🇵 日文</option>
+                                        <option value="ko">🇰🇷 韩文</option>
+                                        <option value="es">🇪🇸 西班牙文</option>
+                                        <option value="fr">🇫🇷 法文</option>
+                                        <option value="de">🇩🇪 德文</option>
+                                    </select>
+                                </div>
+                            </div>
+                            
+                            <!-- 提取按钮 -->
+                            <div class="d-flex justify-content-end mt-4">
+                                <button id="extract-subtitle-btn" class="btn btn-info btn-sm" type="button">
+                                    <i class="bi bi-play-circle me-1"></i>开始提取字幕
+                                </button>
+                            </div>
+                            
+                            <!-- 模型下载进度 -->
+                            <div class="mt-4" id="model-download-progress" style="display: none;">
+                                <div class="card border-0 bg-white shadow-sm">
+                                    <div class="card-body p-3">
+                                        <h6 class="card-subtitle mb-3 text-primary">
+                                            <i class="bi bi-download me-2"></i>
+                                            <span id="model-download-title">正在下载模型...</span>
+                                        </h6>
+                                        <div class="progress mb-3" style="height: 8px;">
+                                            <div id="model-download-progress-bar" class="progress-bar progress-bar-striped progress-bar-animated" 
+                                                 role="progressbar" style="width: 0%;" 
+                                                 aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+                                            </div>
+                                        </div>
+                                        <div class="d-flex justify-content-between small text-muted">
+                                            <span id="model-download-size">0 MB / 0 MB</span>
+                                            <span id="model-download-speed">0 KB/s</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- 提取状态 -->
+                            <div class="mt-4" id="extract-subtitle-status" style="display: none;"></div>
+                        </div>
+                    </div>
+                    
+                    <!-- 模型信息与对比区域 - 可折叠 -->
+                    <div class="accordion" id="model-info-accordion">
+                        <div class="accordion-item border-0 shadow-sm">
+                            <h2 class="accordion-header" id="model-info-heading">
+                                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" 
+                                        data-bs-target="#model-info-collapse" aria-expanded="false" aria-controls="model-info-collapse">
+                                    <h6 class="mb-0 text-dark fw-semibold">
+                                        <i class="bi bi-info-circle me-2"></i>模型信息与对比
+                                    </h6>
+                                </button>
+                            </h2>
+                            <div id="model-info-collapse" class="accordion-collapse collapse" 
+                                 aria-labelledby="model-info-heading" data-bs-parent="#model-info-accordion">
+                                <div class="accordion-body p-4">
+                                    <!-- 模型对比表格 -->
+                                    <div class="table-responsive mb-4">
+                                        <table class="table table-sm table-hover border-0">
+                                            <thead class="border-0">
+                                                <tr class="border-0">
+                                                    <th class="border-0 text-muted fw-normal">模型</th>
+                                                    <th class="border-0 text-muted fw-normal">大小</th>
+                                                    <th class="border-0 text-muted fw-normal">速度</th>
+                                                    <th class="border-0 text-muted fw-normal">精度</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody class="border-0">
+                                                <tr class="border-0">
+                                                    <td class="border-0"><strong>Tiny</strong></td>
+                                                    <td class="border-0 text-muted">39MB</td>
+                                                    <td class="border-0"><span class="badge bg-success bg-opacity-10 text-success">极快</span></td>
+                                                    <td class="border-0"><span class="badge bg-warning bg-opacity-10 text-warning">一般</span></td>
+                                                </tr>
+                                                <tr class="border-0 bg-primary bg-opacity-5">
+                                                    <td class="border-0"><strong>Base</strong> <span class="badge bg-primary bg-opacity-10 text-primary ms-1">推荐</span></td>
+                                                    <td class="border-0 text-muted">74MB</td>
+                                                    <td class="border-0"><span class="badge bg-success bg-opacity-10 text-success">快</span></td>
+                                                    <td class="border-0"><span class="badge bg-info bg-opacity-10 text-info">良好</span></td>
+                                                </tr>
+                                                <tr class="border-0">
+                                                    <td class="border-0"><strong>Small</strong></td>
+                                                    <td class="border-0 text-muted">244MB</td>
+                                                    <td class="border-0"><span class="badge bg-info bg-opacity-10 text-info">中等</span></td>
+                                                    <td class="border-0"><span class="badge bg-success bg-opacity-10 text-success">很好</span></td>
+                                                </tr>
+                                                <tr class="border-0">
+                                                    <td class="border-0"><strong>Medium</strong></td>
+                                                    <td class="border-0 text-muted">769MB</td>
+                                                    <td class="border-0"><span class="badge bg-warning bg-opacity-10 text-warning">慢</span></td>
+                                                    <td class="border-0"><span class="badge bg-success bg-opacity-10 text-success">优秀</span></td>
+                                                </tr>
+                                                <tr class="border-0">
+                                                    <td class="border-0"><strong>Large</strong></td>
+                                                    <td class="border-0 text-muted">1550MB</td>
+                                                    <td class="border-0"><span class="badge bg-danger bg-opacity-10 text-danger">很慢</span></td>
+                                                    <td class="border-0"><span class="badge bg-success bg-opacity-10 text-success">最佳</span></td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    
+                                    <!-- 使用提示 -->
+                                    <div class="alert alert-light border-0 mb-4 p-3">
+                                        <div class="d-flex align-items-start">
+                                            <i class="bi bi-lightbulb text-warning me-3 mt-1" style="font-size: 1.25rem;"></i>
+                                            <div>
+                                                <strong class="text-dark">使用建议</strong>
+                                                <ul class="mb-0 mt-2 small text-muted">
+                                                    <li>首次使用会自动下载模型，请保持网络连接</li>
+                                                    <li>GPU加速可显著提升处理速度</li>
+                                                    <li>长音频建议使用较小模型以节省时间</li>
+                                                </ul>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- 已安装模型 -->
+                                    <div id="installed-models-section" style="display: none;">
+                                        <h6 class="card-subtitle mb-3 text-dark fw-semibold border-top pt-3">
+                                            <i class="bi bi-hdd me-2"></i>已安装模型
+                                        </h6>
+                                        <div id="installed-models-list" class="small">
+                                            <div class="text-center text-muted py-3">
+                                                <div class="spinner-border spinner-border-sm me-2" role="status">
+                                                    <span class="visually-hidden">Loading...</span>
+                                                </div>
+                                                正在检测已安装的模型...
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Step 2: Page Configuration -->
+            <section id="timing-section" class="card mb-4" style="display: none;">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-file-earmark-text me-2"></i>
+                        第2步：页面设置
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <!-- Layout Mode Selection and Page Range -->
+                    <div class="row g-3">
+                        <!-- 设置文本页面范围 -->
+                        <div class="col-12">
+                            <div class="card">
+                                <div class="card-body">
+                                    <div class="row align-items-center">
+                                        <div class="col-md-8">
+                                            <div class="d-flex align-items-center">
+                                                <div class="me-4">
+                                                    <h6 class="mb-1">设置文本页面范围</h6>
+                                                    <small class="text-muted">设置音频对应的原文的开始与结束页码</small>
+                                                </div>
+                                                <div class="d-flex align-items-center">
+                                                    <input type="number" id="timing-start-page" class="form-control me-2" value="" min="0" style="width: 80px;">
+                                                    <span class="me-2">至</span>
+                                                    <input type="number" id="timing-end-page" class="form-control" placeholder="最后页" min="0" style="width: 80px;">
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <div class="d-flex align-items-end gap-2">
+                                                <div class="flex-grow-1">
+                                                    <label class="form-label fw-bold mb-1">翻页效果</label>
+                                                    <select id="transition-effect" class="form-select">
+                                                        <option value="turn-js" selected>Turn.js翻页效果</option>
+                                                        <option value="fade">淡入淡出</option>
+                                                        <option value="slide">滑动切换</option>
+                                                        <option value="flip">3D翻转</option>
+                                                        <option value="zoom">缩放效果</option>
+                                                        <option value="wipe">擦除效果</option>
+                                                        <option value="cube">立方体翻转</option>
+                                                        <option value="page-curl">卷页效果</option>
+                                                        <option value="accordion">手风琴</option>
+                                                        <option value="ripple">波纹效果</option>
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <button class="btn btn-sm btn-outline-primary" id="preview-transition-btn" title="预览翻页效果">
+                                                        <i class="bi bi-eye"></i> 预览
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- 竖排双页模式和PDF边界裁剪设置 -->
+                        <div class="col-md-6">
+                            <div class="card h-100">
+                                <div class="card-header d-flex justify-content-between align-items-center bg-light">
+                                    <h6 class="mb-0">竖排双页模式</h6>
+                                    <div class="form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" id="vertical-layout" checked>
+                                        <label class="form-check-label" for="vertical-layout">启用</label>
+                                    </div>
+                                </div>
+                                <div class="card-body" id="pageOrderSettings">
+                                    <div class="mb-3">
+                                        <label class="form-label small fw-bold">页面排列顺序
+                                            <sup class="text-primary" data-bs-toggle="tooltip" data-bs-placement="top" title="启用后将两页作为一个视频背景，可选择页面排列顺序">
+                                                <i class="bi bi-question-circle"></i>
+                                            </sup>
+                                        </label>
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="radio" name="pageOrder" id="oddRightEvenLeft" value="oddRightEvenLeft" checked>
+                                            <label class="form-check-label" for="oddRightEvenLeft">
+                                                奇数页在右侧，偶数页在左侧
+                                            </label>
+                                        </div>
+                                        <div class="form-check mt-2">
+                                            <input class="form-check-input" type="radio" name="pageOrder" id="oddLeftEvenRight" value="oddLeftEvenRight">
+                                            <label class="form-check-label" for="oddLeftEvenRight">
+                                                奇数页在左侧，偶数页在右侧
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <div class="card h-100">
+                                <div class="card-header d-flex justify-content-between align-items-center bg-light">
+                                    <h6 class="mb-0">PDF边界裁剪设置</h6>
+                                    <div class="form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" id="enableCrop">
+                                        <label class="form-check-label" for="enableCrop">启用裁剪</label>
+                                    </div>
+                                </div>
+                                <div class="card-body" id="cropSettings">
+                                    <div class="row mb-3">
+                                        <div class="col-6">
+                                            <label class="form-label small fw-bold">单数页裁剪 (像素)</label>
+                                            <div class="row g-2">
+                                                <div class="col-6">
+                                                    <div class="input-group input-group-sm">
+                                                        <span class="input-group-text">上</span>
+                                                        <input type="number" class="form-control" id="oddTopCrop" min="0" value="0">
+                                                    </div>
+                                                </div>
+                                                <div class="col-6">
+                                                    <div class="input-group input-group-sm">
+                                                        <span class="input-group-text">下</span>
+                                                        <input type="number" class="form-control" id="oddBottomCrop" min="0" value="0">
+                                                    </div>
+                                                </div>
+                                                <div class="col-6">
+                                                    <div class="input-group input-group-sm">
+                                                        <span class="input-group-text">左</span>
+                                                        <input type="number" class="form-control" id="oddLeftCrop" min="0" value="0">
+                                                    </div>
+                                                </div>
+                                                <div class="col-6">
+                                                    <div class="input-group input-group-sm">
+                                                        <span class="input-group-text">右</span>
+                                                        <input type="number" class="form-control" id="oddRightCrop" min="0" value="0">
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="col-6">
+                                            <label class="form-label small fw-bold">偶数页裁剪 (像素)</label>
+                                            <div class="row g-2">
+                                                <div class="col-6">
+                                                    <div class="input-group input-group-sm">
+                                                        <span class="input-group-text">上</span>
+                                                        <input type="number" class="form-control" id="evenTopCrop" min="0" value="0">
+                                                    </div>
+                                                </div>
+                                                <div class="col-6">
+                                                    <div class="input-group input-group-sm">
+                                                        <span class="input-group-text">下</span>
+                                                        <input type="number" class="form-control" id="evenBottomCrop" min="0" value="0">
+                                                    </div>
+                                                </div>
+                                                <div class="col-6">
+                                                    <div class="input-group input-group-sm">
+                                                        <span class="input-group-text">左</span>
+                                                        <input type="number" class="form-control" id="evenLeftCrop" min="0" value="0">
+                                                    </div>
+                                                </div>
+                                                <div class="col-6">
+                                                    <div class="input-group input-group-sm">
+                                                        <span class="input-group-text">右</span>
+                                                        <input type="number" class="form-control" id="evenRightCrop" min="0" value="0">
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 添加额外空间以便放下预览按钮 -->
+                    <div class="mb-5"></div>
+                    
+                    <!-- 页面设置预览按钮 -->
+                    <div class="position-absolute bottom-0 end-0 p-3">
+                        <button class="btn btn-sm btn-outline-primary" id="preview-page-settings-btn" title="预览页面设置">
+                            <i class="bi bi-eye"></i> 预览
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Step 3: DeepSeek字幕校正 -->
+            <section id="deepseek-section" class="card mb-4" style="display: none;">
+                <script>
+                    // 页面加载后检查是否有上传的文件，如果有则显示此section
+                    document.addEventListener('DOMContentLoaded', function() {
+                        // 延迟检查，等待其他JavaScript加载完成
+                        setTimeout(function() {
+                            const deepseekSection = document.getElementById('deepseek-section');
+                            if (deepseekSection && window.videoApp) {
+                                // 检查是否已上传文件
+                                if (window.videoApp.uploadedFiles &&
+                                    (window.videoApp.uploadedFiles.pdf ||
+                                     window.videoApp.uploadedFiles.audio ||
+                                     window.videoApp.uploadedFiles.subs)) {
+                                    console.log('DeepSeek section: 检测到已上传文件，显示section');
+                                    // 不会在这里直接显示，而是通过showNextSection()
+                                }
+                            }
+                        }, 1500);
+                    });
+                </script>
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-magic me-2"></i>
+                        第3步：字幕校正
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <!-- API配置区域 -->
+                    <div class="row mb-4">
+                        <div class="col-12">
+                            <div class="card border-info">
+                                <div class="card-header bg-light">
+                                    <h6 class="card-title mb-0">
+                                        <i class="bi bi-gear me-2"></i>DeepSeek 配置
+                                    </h6>
+                                </div>
+                                <div class="card-body">
+                                    <!-- 校正方式选择 - Streamlit风格标签页 -->
+                                    <div class="row mb-3">
+                                        <div class="col-12">
+                                            <label class="form-label">校正方式</label>
+                                            <div class="streamlit-tabs">
+                                                <ul class="streamlit-tab-list" role="tablist">
+                                                    <li class="streamlit-tab active" data-tab="api" role="tab" aria-selected="true">
+                                                        <i class="bi bi-cloud-arrow-up me-2"></i>API接口
+                                                    </li>
+                                                    <li class="streamlit-tab" data-tab="web" role="tab" aria-selected="false">
+                                                        <i class="bi bi-browser-chrome me-2"></i>网页交互
+                                                    </li>
+                                                </ul>
+                                                <div class="streamlit-tab-content">
+                                                    <div class="form-text mt-2">
+                                                        <span id="method-description">
+                                                            <i class="bi bi-info-circle me-1"></i>
+                                                            通过DeepSeek API直接进行字幕校正，速度快但需要API密钥
+                                                        </span>
+                                                        <span id="web-method-description" style="display: none;">
+                                                            <i class="bi bi-info-circle me-1"></i>
+                                                            通过模拟网页操作进行字幕校正，使用API认证，适合处理复杂场景
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- API配置区域 -->
+                                    <div id="api-config-section">
+                                        <div class="row align-items-end">
+                                            <div class="col-md-6">
+                                                <label for="deepseek-api-key" class="form-label">
+                                                    API密钥 <sup class="text-danger">*</sup>
+                                                    <small class="text-muted">（从 <a href="https://platform.deepseek.com/" target="_blank">DeepSeek平台</a> 获取）</small>
+                                                </label>
+                                                <div class="input-group">
+                                                    <input type="password" class="form-control" id="deepseek-api-key" placeholder="输入DeepSeek API密钥">
+                                                    <button class="btn btn-outline-secondary" type="button" id="toggle-api-key">
+                                                        <i class="bi bi-eye"></i>
+                                                    </button>
+                                                    <button class="btn btn-outline-info" type="button" id="test-connection">
+                                                        <i class="bi bi-wifi"></i> 测试连接
+                                                    </button>
+                                                </div>
+                                                <div class="form-text">
+                                                    <i class="bi bi-shield-check me-1"></i>
+                                                    密钥仅用于当前会话，不会永久存储
+                                                </div>
+                                            </div>
+                                            <div class="col-md-2">
+                                                <div class="form-check form-switch mt-4">
+                                                    <input class="form-check-input" type="checkbox" id="enable-deepthink" checked>
+                                                    <label class="form-check-label" for="enable-deepthink">
+                                                        启用DeepThink
+                                                    </label>
+                                                    <div class="form-text">深度思考模式</div>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-2">
+                                                <label for="batch-size" class="form-label">
+                                                    <i class="bi bi-layers me-1"></i>分批大小
+                                                </label>
+                                                <input type="number" class="form-control" id="batch-size" value="50" min="10" max="200" step="10">
+                                                <div class="form-text">每批处理的字幕条数</div>
+                                            </div>
+                                            <div class="col-md-2">
+                                                <div id="connection-status" class="text-center">
+                                                    <span class="badge bg-secondary">
+                                                        <i class="bi bi-question-circle me-1"></i>未测试
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- 网页交互配置区域 -->
+                                    <div id="web-config-section" style="display: none;">
+                                        <div class="row align-items-end">
+                                            <div class="col-md-6">
+                                                <label for="web-deepseek-api-key" class="form-label">
+                                                    API密钥 <sup class="text-danger">*</sup>
+                                                    <small class="text-muted">（从 <a href="https://platform.deepseek.com/" target="_blank">DeepSeek平台</a> 获取）</small>
+                                                </label>
+                                                <div class="input-group">
+                                                    <input type="password" class="form-control" id="web-deepseek-api-key" placeholder="输入DeepSeek API密钥">
+                                                    <button class="btn btn-outline-secondary" type="button" id="toggle-web-api-key">
+                                                        <i class="bi bi-eye"></i>
+                                                    </button>
+                                                    <button class="btn btn-outline-info" type="button" id="test-web-connection">
+                                                        <i class="bi bi-wifi"></i> 测试连接
+                                                    </button>
+                                                </div>
+                                                <div class="form-text">
+                                                    <i class="bi bi-shield-check me-1"></i>
+                                                    密钥仅用于当前会话，不会永久存储
+                                                </div>
+                                            </div>
+                                            <div class="col-md-3">
+                                                <div class="form-check form-switch mt-4">
+                                                    <input class="form-check-input" type="checkbox" id="web-enable-deepthink" checked>
+                                                    <label class="form-check-label" for="web-enable-deepthink">
+                                                        启用DeepThink深度思考
+                                                    </label>
+                                                    <div class="form-text">提供更准确的分析结果</div>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-3">
+                                                <div class="form-check form-switch mt-4">
+                                                    <input class="form-check-input" type="checkbox" id="headless-mode" checked>
+                                                    <label class="form-check-label" for="headless-mode">
+                                                        无头模式
+                                                    </label>
+                                                    <div class="form-text">不显示浏览器界面</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="row mt-3">
+                                            <div class="col-12">
+                                                <div id="web-connection-status" class="text-center">
+                                                    <span class="badge bg-secondary">
+                                                        <i class="bi bi-question-circle me-1"></i>未测试
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 提示词展示区域 -->
+                    <div class="row mb-4">
+                        <div class="col-12">
+                            <div class="card border-secondary">
+                                <div class="card-header bg-light" data-bs-toggle="collapse" data-bs-target="#promptContentCollapse" style="cursor: pointer;">
+                                    <h6 class="card-title mb-0 d-flex justify-content-between align-items-center">
+                                        <span>
+                                            <i class="bi bi-info-circle me-2"></i>字幕校正提示词
+                                        </span>
+                                        <i class="bi bi-chevron-down" id="prompt-chevron"></i>
+                                    </h6>
+                                </div>
+                                <div class="collapse" id="promptContentCollapse">
+                                    <div class="card-body">
+                                        <div class="alert alert-info">
+                                            <i class="bi bi-lightbulb me-2"></i>
+                                            <strong>提示：</strong>以下是发送给DeepSeek AI的字幕校正提示词，它定义了校正的具体要求和标准。
+                                        </div>
+                                        <div class="bg-light p-3 rounded">
+                                            <div class="markdown-content">
+                                                <h5>你是一个专业的字幕校正专家。请根据提供的原文，校正以下字幕内容。</h5>
+                                                
+                                                <div class="alert alert-danger mb-3">
+                                                    <strong>【核心要求 - 必须严格遵守】</strong><br>
+                                                    输入字幕共有 N 条，输出也必须是 N 条！<br>
+                                                    绝对不允许合并、删除或增加任何字幕条目！
+                                                </div>
+                                                
+                                                <p>请根据第二段原文文本，对第一段字幕文本进行精确校对。具体要求如下：</p>
+                                                
+                                                <ol>
+                                                    <li><strong>错别字校正</strong>：以第二段原文为基准，逐一修正第一段字幕文本中的错别字，确保文字内容与原文完全一致。</li>
+                                                    <li><strong>标点符号补充</strong>：根据第二段原文的标点使用，为第一段字幕文本添加缺失的标点符号（如句号、逗号、引号等），保持标点规范。</li>
+                                                    <li><strong>格式保留</strong>：严格保持第一段字幕文本的原始格式，包括：
+                                                        <ul>
+                                                            <li>序号（如"1""2"等）- 必须从1到N连续不断</li>
+                                                            <li>时间轴（如"00:00:03,550 --> 00:00:08,380"）- 完全不变</li>
+                                                            <li>文本行布局和换行 - 保持原样</li>
+                                                        </ul>
+                                                    </li>
+                                                    <li><strong>字数控制</strong>：尽可能保持每行字幕的原始字数，只在校正错误时进行必要调整，避免无故增删。</li>
+                                                    <li><strong>条目数量保持</strong>：<span class="text-danger">【最重要】</span>
+                                                        <ul>
+                                                            <li>输入有 N 条字幕，输出必须有 N 条字幕</li>
+                                                            <li>不得合并任何字幕条目（即使内容相关）</li>
+                                                            <li>不得删除任何字幕条目（即使内容重复）</li>
+                                                            <li>不得增加任何字幕条目</li>
+                                                            <li>保持一一对应关系：第1条对第1条，第2条对第2条...第N条对第N条</li>
+                                                        </ul>
+                                                    </li>
+                                                    <li><strong>输出要求</strong>：
+                                                        <ul>
+                                                            <li>返回完整的 N 条字幕</li>
+                                                            <li>仅修改文字和标点</li>
+                                                            <li>序号、时间轴、空行完全保留</li>
+                                                            <li>必须输出到最后一条（第N条）</li>
+                                                        </ul>
+                                                    </li>
+                                                </ol>
+                                                
+                                                <p>请逐行对照第二段原文进行校对，确保结果准确、专业，并可直接用于字幕场景。</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 文件上传区域 -->
+                    <div class="row mb-4">
+                        <div class="col-md-6">
+                            <div class="card h-100">
+                                <div class="card-header">
+                                    <h6 class="card-title mb-0">
+                                        <i class="bi bi-file-text me-2"></i>待校正字幕文件
+                                    </h6>
+                                </div>
+                                <div class="card-body">
+                                    <div class="mb-3">
+                                        <label for="subtitle-file-upload" class="form-label">选择字幕文件</label>
+                                        <input type="file" class="form-control" id="subtitle-file-upload" accept=".srt,.txt,.vtt">
+                                        <div class="form-text">支持格式：.srt, .txt, .vtt</div>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="subtitle-text" class="form-label">或直接粘贴字幕文本</label>
+                                        <textarea class="form-control" id="subtitle-text" rows="8" placeholder="粘贴SRT字幕文本内容..."></textarea>
+                                        <div class="form-text">包含序号、时间轴和字幕内容</div>
+                                    </div>
+                                    <div class="d-flex gap-2">
+                                        <button class="btn btn-sm btn-outline-primary flex-fill" id="load-subtitle-from-uploaded">
+                                            <i class="bi bi-upload"></i> 从上传文件加载
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-info flex-fill" id="load-current-subtitle">
+                                            <i class="bi bi-folder-open"></i> 使用当前字幕
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="card h-100">
+                                <div class="card-header">
+                                    <h6 class="card-title mb-0">
+                                        <i class="bi bi-file-earmark-text me-2"></i>原文参考文件
+                                    </h6>
+                                </div>
+                                <div class="card-body">
+                                    <div class="mb-3">
+                                        <label for="original-file-upload" class="form-label">选择原文文件</label>
+                                        <input type="file" class="form-control" id="original-file-upload" accept=".txt,.pdf,.epub">
+                                        <div class="form-text">支持格式：.txt, .pdf, .epub</div>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="original-text" class="form-label">或直接粘贴原文文本</label>
+                                        <textarea class="form-control" id="original-text" rows="8" placeholder="粘贴原文文本内容..."></textarea>
+                                        <div class="form-text">用于校正字幕的参考文本</div>
+                                    </div>
+                                    <div class="d-grid gap-2">
+                                        <button class="btn btn-sm btn-outline-success" id="start-correction">
+                                            <i class="bi bi-magic"></i> 开始字幕校正
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 校正结果显示区域 -->
+                    <div class="row" id="correction-results" style="display: none;">
+                        <div class="col-12">
+                            <div class="card border-success">
+                                <div class="card-header bg-light">
+                                    <h6 class="card-title mb-0">
+                                        <i class="bi bi-check-circle me-2"></i>校正结果
+                                    </h6>
+                                </div>
+                                <div class="card-body">
+                                    <!-- 校正信息 -->
+                                    <div class="row mb-3" id="correction-info">
+                                        <div class="col-md-3">
+                                            <div class="text-center">
+                                                <div class="text-success">
+                                                    <i class="bi bi-check-circle-fill me-1"></i>
+                                                    <strong>校正成功</strong>
+                                                </div>
+                                                <div class="small text-muted" id="processing-time">处理时间：0秒</div>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-9">
+                                            <div class="row g-2 align-items-end">
+                                                <div class="col-md-4">
+                                                    <label for="corrected-filename" class="form-label small mb-1">
+                                                        <i class="bi bi-file-earmark-text me-1"></i>保存文件名
+                                                    </label>
+                                                    <input type="text" class="form-control form-control-sm" id="corrected-filename" 
+                                                           placeholder="subtitle_corrected.srt" value="subtitle_corrected.srt">
+                                                </div>
+                                                <div class="col-md-8">
+                                                    <div class="d-flex gap-2">
+                                                        <button class="btn btn-sm btn-primary" id="apply-correction">
+                                                            <i class="bi bi-check-lg"></i> 应用校正结果
+                                                        </button>
+                                                        <button class="btn btn-sm btn-outline-info" id="download-corrected">
+                                                            <i class="bi bi-download"></i> 下载
+                                                        </button>
+                                                        <button class="btn btn-sm btn-outline-secondary" id="copy-corrected">
+                                                            <i class="bi bi-clipboard"></i> 复制
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- 对比显示区域 -->
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <h6 class="text-muted">
+                                                <i class="bi bi-file-text me-1"></i>原始字幕
+                                            </h6>
+                                            <textarea class="form-control font-monospace small" id="original-subtitle-display" rows="10" readonly></textarea>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <h6 class="text-success">
+                                                <i class="bi bi-magic me-1"></i>校正后字幕
+                                            </h6>
+                                            <textarea class="form-control font-monospace small" id="corrected-subtitle-display" rows="10" readonly></textarea>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 历史记录 -->
+                    <div class="row mt-4">
+                        <div class="col-12">
+                            <div class="card">
+                                <div class="card-header">
+                                    <h6 class="card-title mb-0">
+                                        <i class="bi bi-clock-history me-2"></i>校正历史记录
+                                    </h6>
+                                </div>
+                                <div class="card-body">
+                                    <div id="correction-history">
+                                        <div class="text-center text-muted">
+                                            <i class="bi bi-inbox me-2"></i>暂无校正记录
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Step 4: Page Timing Configuration -->
+            <section id="page-timing-section" class="card mb-4" style="display: none;">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-clock me-2"></i>
+                        第4步：翻页时间设置
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h6 class="mb-0">翻页时间点设置（秒）</h6>
+                        <div>
+                            <button id="generate-timings-from-subs" class="btn btn-sm btn-outline-info me-2">从字幕提取时间点</button>
+                            <button id="reset-timings" class="btn btn-sm btn-outline-secondary me-2">重置</button>
+                            <button id="save-config" class="btn btn-sm btn-outline-success me-2">保存配置</button>
+                            <button id="load-config" class="btn btn-sm btn-outline-info me-2">加载配置</button>
+                        </div>
+                    </div>
+                    
+                    <div id="page-timings-grid" class="row">
+                        <!-- Page timing inputs will be dynamically inserted here -->
+                    </div>
+                    <div class="mt-2">
+                    </div>
+                    
+                    <div class="mt-3">
+                        <div class="d-flex justify-content-between">
+                            <span>总时长：<strong id="total-duration">0</strong> 秒</span>
+                            <span class="text-muted">翻页点数：<strong id="page-count">0</strong> 个</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Step 5: Video Settings -->
+            <section id="settings-section" class="card mb-4" style="display: none;">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-gear me-2"></i>
+                        第5步：视频设置
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <!-- 视频设置选项 -->
+                        <div class="col-12">
+                            <div class="row">
+                                <div class="col-12 mb-3">
+                                    <label for="output-name" class="form-label fw-bold">视频文件名</label>
+                                    <input type="text" id="output-name" class="form-control" placeholder="视频文件名（不含扩展名）">
+                                    <div class="form-text">设置输出视频的文件名，默认使用字幕文件或音频文件名</div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label fw-bold">视频质量</label>
+                                    <select id="quality" class="form-select">
+                                        <option value="low">低质量 (小文件)</option>
+                                        <option value="medium" selected>中等质量 (推荐)</option>
+                                        <option value="high">高质量</option>
+                                        <option value="ultra">超高质量</option>
+                                    </select>
+                                    <div class="form-text">选择视频质量等级，影响输出文件大小和清晰度</div>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label fw-bold">比特率</label>
+                                    <select id="bitrate" class="form-select">
+                                        <option value="500k">500k (极小)</option>
+                                        <option value="800k">800k (小)</option>
+                                        <option value="1.5M" selected>1.5M (中等)</option>
+                                        <option value="2.5M">2.5M (大)</option>
+                                        <option value="4M">4M (极大)</option>
+                                    </select>
+                                    <div class="form-text">控制视频数据传输速率，影响文件大小和质量</div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label fw-bold">分辨率</label>
+                                    <select id="resolution" class="form-select">
+                                        <option value="">自动</option>
+                                        <option value="1920x1080">1920x1080 (1080p)</option>
+                                        <option value="1280x720" selected>1280x720 (720p)</option>
+                                        <option value="854x480">854x480 (480p)</option>
+                                        <option value="640x360">640x360 (360p)</option>
+                                    </select>
+                                    <div class="form-text">设置视频输出分辨率，留空则自动选择</div>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label fw-bold">输出文件名</label>
+                                    <input type="text" id="output-name-custom" class="form-control" placeholder="my_video">
+                                    <div class="form-text">自定义输出视频文件名（不含扩展名）</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 预计文件大小显示 -->
+                    <div class="row mt-3">
+                        <div class="col-12">
+                            <div class="alert alert-info mb-0">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <span class="fw-bold">预计文件大小：</span>
+                                        <span id="estimated-size" class="text-primary">计算中...</span>
+                                    </div>
+                                    <div class="text-muted small">
+                                        <i class="bi bi-info-circle me-1"></i>
+                                        文件大小根据视频长度、质量和分辨率自动计算
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Step 6: Create Video -->
+            <section id="create-section" class="card mb-4" style="display: none;">
+                <div class="card-body text-center">
+                    <button id="create-video-btn" class="btn btn-success btn-lg">
+                        <i class="bi bi-play-circle me-2"></i>
+                        开始创建视频
+                    </button>
+                    <div class="mt-3 text-muted">
+                        <small>预计处理时间：根据文件大小和质量设置，通常需要5-20分钟</small>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Progress Section -->
+            <section id="progress-section" class="card mb-4" style="display: none;">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-hourglass-split me-2"></i>
+                        处理进度
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <div class="d-flex justify-content-between mb-1">
+                            <span id="progress-message">准备中...</span>
+                            <span id="progress-percent">0%</span>
+                        </div>
+                        <div class="progress">
+                            <div id="progress-bar" class="progress-bar" role="progressbar" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <small class="text-muted">任务ID：<span id="job-id">--</span></small>
+                        </div>
+                        <div class="col-md-6 text-end">
+                            <small class="text-muted">开始时间：<span id="start-time">--</span></small>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Log Section - 默认显示 -->
+            <section id="log-section" class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-journal-text me-2"></i>
+                        处理日志
+                    </h5>
+                    <div class="card-tools">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="clear-log-btn">
+                            <i class="bi bi-trash me-1"></i>
+                            清除日志
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="toggle-log-btn">
+                            <i class="bi bi-chevron-down me-1"></i>
+                            展开/收起
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="toggle-ui-log-btn" title="启用/禁用界面日志">
+                            <i class="bi bi-eye me-1"></i>
+                            界面日志
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div id="log-container" class="log-container" style="max-height: 400px; overflow-y: auto; background-color: #f8f9fa; padding: 10px; border-radius: 4px; font-family: 'Courier New', monospace; font-size: 13px; color: #495057;">
+                        <div id="log-content">
+                            <div class="log-entry log-info">
+                                <span class="log-time">[系统]</span> 
+                                <span class="log-message">日志系统已就绪，等待处理开始...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+
+
+            <!-- Results Section -->
+            <section id="results-section" class="card mb-4" style="display: none;">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-check-circle me-2"></i>
+                        完成结果
+                    </h5>
+                </div>
+                <div class="card-body text-center">
+                    <div class="alert alert-success" id="results-alert">
+                        <i class="bi bi-check-circle-fill me-2"></i>
+                        <span id="results-message">视频创建成功！</span>
+                    </div>
+                    <div class="mb-3">
+                        <a id="download-link" href="#" class="btn btn-primary btn-lg me-2" download>
+                            <i class="bi bi-download me-2"></i>
+                            下载视频
+                        </a>
+                        <button id="preview-video-btn" class="btn btn-success btn-lg me-2">
+                            <i class="bi bi-play-circle me-2"></i>
+                            预览视频
+                        </button>
+                        <button id="open-directory-btn" class="btn btn-outline-secondary btn-lg me-2" style="display: none;">
+                            <i class="bi bi-folder2-open me-2"></i>
+                            打开本地目录
+                        </button>
+                    </div>
+                    <div class="row text-start">
+                        <div class="col-md-4">
+                            <strong>文件名：</strong><span id="result-filename">--</span>
+                        </div>
+                        <div class="col-md-4">
+                            <strong>文件大小：</strong><span id="result-filesize">--</span>
+                        </div>
+                        <div class="col-md-4">
+                            <strong>创建时间：</strong><span id="result-time">--</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+
+        </main>
+    </div>
+
+    <!-- PDF Preview Modal -->
+    <div class="modal fade" id="pdfPreviewModal" tabindex="-1" aria-labelledby="pdfPreviewModalLabel" aria-hidden="true" data-bs-backdrop="static">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                </div>
+                <div class="modal-body">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div class="d-flex align-items-center">
+                            <span id="pdf-page-info" class="me-3">第 1 页，共 1 页</span>
+                            <div class="input-group" style="width: 200px;">
+                                <input type="number" id="pdf-page-jump" class="form-control form-control-sm" min="1" value="1">
+                                <button class="btn btn-sm btn-outline-primary" id="pdf-page-jump-btn">跳转</button>
+                            </div>
+                        </div>
+                        <div>
+                            <button class="btn btn-sm btn-outline-secondary" id="pdf-prev-page">
+                                <i class="bi bi-chevron-left"></i> 上一页
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" id="pdf-next-page">
+                                下一页 <i class="bi bi-chevron-right"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="pdf-preview-container text-center">
+                        <canvas id="pdf-preview-canvas" class="img-fluid" width="800" height="600" style="background-color: #f8f9fa;"></canvas>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Subtitles Preview Modal -->
+    <div class="modal fade" id="subsPreviewModal" tabindex="-1" aria-labelledby="subsPreviewModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="subsPreviewModalLabel">字幕预览</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="subs-preview-container">
+                        <table class="table table-striped table-hover">
+                            <thead>
+                                <tr>
+                                    <th style="width: 80px;">序号</th>
+                                    <th style="width: 180px;">时间范围</th>
+                                    <th>字幕内容</th>
+                                </tr>
+                            </thead>
+                            <tbody id="subs-preview-tbody">
+                                <!-- Subtitle entries will be inserted here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Config Preview Modal -->
+    <div class="modal fade" id="configPreviewModal" tabindex="-1" aria-labelledby="configPreviewModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="configPreviewModalLabel">配置信息预览</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="config-preview-container">
+                        <pre id="config-preview-content" class="p-3 bg-light rounded" style="max-height: 500px; overflow-y: auto;"></pre>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Video Preview Modal -->
+    <div class="modal fade" id="videoPreviewModal" tabindex="-1" aria-labelledby="videoPreviewModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="videoPreviewModalLabel">视频预览</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="video-preview-container text-center">
+                        <video id="video-preview-player" class="img-fluid" controls style="max-width: 100%; max-height: 500px;">
+                            您的浏览器不支持视频播放。
+                        </video>
+                    </div>
+                    <div class="mt-3">
+                        <div class="row">
+                            <div class="col-md-4">
+                                <strong>文件名：</strong><span id="video-preview-filename">--</span>
+                            </div>
+                            <div class="col-md-4">
+                                <strong>文件大小：</strong><span id="video-preview-filesize">--</span>
+                            </div>
+                            <div class="col-md-4">
+                                <strong>创建时间：</strong><span id="video-preview-time">--</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Crop Preview Modal -->
+    <div class="modal fade" id="cropPreviewModal" tabindex="-1" aria-labelledby="cropPreviewModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="cropPreviewModalLabel">PDF裁剪预览</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div class="d-flex align-items-center">
+                            <span id="crop-page-info" class="me-3">第 1 页，共 1 页</span>
+                            <div class="input-group" style="width: 200px;">
+                                <input type="number" id="crop-page-jump" class="form-control form-control-sm" min="1" value="1">
+                                <button class="btn btn-sm btn-outline-primary" id="crop-page-jump-btn">跳转</button>
+                            </div>
+                        </div>
+                        <div>
+                            <button class="btn btn-sm btn-outline-secondary" id="crop-prev-page">
+                                <i class="bi bi-chevron-left"></i> 上一页
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" id="crop-next-page">
+                                下一页 <i class="bi bi-chevron-right"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="crop-preview-container text-center">
+                        <canvas id="crop-preview-canvas" class="img-fluid"></canvas>
+                    </div>
+                    <div class="mt-3">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <strong>原始尺寸：</strong><span id="crop-original-size">--</span>
+                            </div>
+                            <div class="col-md-6">
+                                <strong>裁剪后尺寸：</strong><span id="crop-cropped-size">--</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Page Settings Preview Modal -->
+    <div class="modal fade" id="pageSettingsPreviewModal" tabindex="-1" aria-labelledby="pageSettingsPreviewModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="pageSettingsPreviewModalLabel">页面设置预览</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div class="d-flex align-items-center">
+                            <span id="page-settings-page-info" class="me-3">第 1 页，共 1 页</span>
+                            <div class="input-group" style="width: 200px;">
+                                <input type="number" id="page-settings-page-jump" class="form-control form-control-sm" min="1" value="1">
+                                <button class="btn btn-sm btn-outline-primary" id="page-settings-page-jump-btn">跳转</button>
+                            </div>
+                        </div>
+                        <div>
+                            <button class="btn btn-sm btn-outline-secondary" id="page-settings-prev-page">
+                                <i class="bi bi-chevron-left"></i> 上一页
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" id="page-settings-next-page">
+                                下一页 <i class="bi bi-chevron-right"></i>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="page-settings-preview-container text-center">
+                        <canvas id="page-settings-preview-canvas" class="img-fluid"></canvas>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Transition Effect Preview Container (Hidden) -->
+    <div id="transition-preview-container" style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 800px; height: 400px; background: #fff; border: 1px solid #ccc; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); display: none; z-index: 9999; overflow: hidden;">
+        <div style="position: relative; width: 100%; height: 100%; display: flex; perspective: 1000px;">
+            <!-- Left page -->
+            <div id="preview-page-left" class="book-page" style="position: relative; width: 50%; height: 100%; background: #f8f8f8; display: flex; align-items: center; justify-content: center; font-size: 20px; color: #333; border-right: 1px solid #ddd; transform-origin: right center;">
+                <div class="page-content">
+                    <div class="page-number">第 1 页</div>
+                    <div class="sample-text">左页内容示例</div>
+                </div>
+            </div>
+            <!-- Right page -->
+            <div id="preview-page-right" class="book-page" style="position: relative; width: 50%; height: 100%; background: #f8f8f8; display: flex; align-items: center; justify-content: center; font-size: 20px; color: #333; transform-origin: left center;">
+                <div class="page-content">
+                    <div class="page-number">第 2 页</div>
+                    <div class="sample-text">右页内容示例</div>
+                </div>
+            </div>
+            <!-- Page flipping overlay -->
+            <div id="page-flip-overlay" class="page-flip-overlay" style="position: absolute; top: 0; left: 50%; width: 50%; height: 100%; background: linear-gradient(90deg, #f8f8f8, #e8e8e8); display: flex; align-items: center; justify-content: center; font-size: 20px; color: #333; transform-origin: left center; backface-visibility: hidden; z-index: 5;">
+                <div class="page-content">
+                    <div class="page-number">第 3 页</div>
+                    <div class="sample-text">新页内容</div>
+                </div>
+            </div>
+            <button id="close-transition-preview" style="position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.5); color: white; border: none; border-radius: 50%; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 10;">
+                <i class="bi bi-x"></i>
+            </button>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='js/console-capture.js') }}?v=2"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}?v=2"></script>
+    <script src="{{ url_for('static', filename='js/turn-js-page-effect.js') }}?v=2"></script>
+    <script src="{{ url_for('static', filename='js/book-page-turn-effect.js') }}?v=2"></script>
+    
+    <!-- 控制台日志显示区域 -->
+    <div id="console-log-display" style="position: fixed; bottom: 10px; right: 10px; width: 400px; max-height: 200px; background: rgba(0,0,0,0.8); color: white; padding: 10px; border-radius: 5px; font-family: monospace; font-size: 12px; overflow-y: auto; z-index: 9999; display: none;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+            <span>控制台日志</span>
+            <button id="toggle-console-log" style="background: none; border: none; color: white; cursor: pointer;">×</button>
+        </div>
+        <div id="console-log-content"></div>
+    </div>
+    
+    <script>
+        // 控制台日志显示控制
+        document.addEventListener('DOMContentLoaded', function() {
+            const consoleLogDisplay = document.getElementById('console-log-display');
+            const consoleLogContent = document.getElementById('console-log-content');
+            const toggleConsoleLog = document.getElementById('toggle-console-log');
+            
+            // 显示控制台日志区域
+            consoleLogDisplay.style.display = 'block';
+            
+            // 关闭按钮事件
+            toggleConsoleLog.addEventListener('click', function() {
+                consoleLogDisplay.style.display = 'none';
+            });
+            
+            // 定期更新控制台日志显示
+            setInterval(function() {
+                const logs = window.getConsoleLogs();
+                if (logs && logs.length > 0) {
+                    let html = '';
+                    // 只显示最新的10条日志
+                    const recentLogs = logs.slice(-10);
+                    recentLogs.forEach(log => {
+                        const color = log.type === 'error' ? '#ff6b6b' : 
+                                     log.type === 'warn' ? '#feca57' : 
+                                     log.type === 'log' ? '#48dbfb' : 'white';
+                        html += `<div style="color: ${color}; margin-bottom: 2px;">[${log.timestamp}] ${log.message}</div>`;
+                    });
+                    consoleLogContent.innerHTML = html;
+                    // 滚动到底部
+                    consoleLogContent.scrollTop = consoleLogContent.scrollHeight;
+                }
+            }, 1000);
+        });
+    </script>
+</body>
+</html>

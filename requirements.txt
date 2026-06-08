@@ -1,0 +1,11 @@
+Flask==2.3.3
+Werkzeug==2.3.7
+PyMuPDF==1.22.5
+bootstrap-flask==2.2.0
+reportlab==4.0.4
+numpy>=1.26.0
+openai-whisper
+faster-whisper
+torch
+torchaudio
+requests>=2.25.0

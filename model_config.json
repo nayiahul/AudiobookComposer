@@ -1,0 +1,34 @@
+{
+  "models": {
+    "tiny": {
+      "path": "~/.cache/whisper/tiny",
+      "installed": false,
+      "size_mb": 0
+    },
+    "base": {
+      "path": "~/.cache/whisper/base",
+      "installed": true,
+      "size_mb": 138.5
+    },
+    "small": {
+      "path": "~/.cache/whisper/small",
+      "installed": false,
+      "size_mb": 0
+    },
+    "medium": {
+      "path": "~/.cache/whisper/medium",
+      "installed": false,
+      "size_mb": 0
+    },
+    "large": {
+      "path": "~/.cache/whisper/large",
+      "installed": false,
+      "size_mb": 0
+    },
+    "large-v3-turbo": {
+      "path": "~/.cache/whisper/large-v3-turbo",
+      "installed": false,
+      "size_mb": 0
+    }
+  }
+}
