@@ -164,76 +164,80 @@ class PDFTextExtractor:
         page: fitz.Page,
         page_number: int
     ) -> PageTextData:
-        """Extract text from a single page."""
-        # Get text with detailed information
-        text_dict = page.get_text("dict")
-        
+        """Extract text from a single page using word-level positions.
+
+        Uses get_text("words") which returns per-character bounding boxes,
+        more robust for PDFs where the dict API misses glyphs.
+        Words format: (x0, y0, x1, y1, word, block_no, line_no, word_no)
+        """
+        words = page.get_text("words")
+
         page_data = PageTextData(
             page_number=page_number,
             page_width=page.rect.width,
             page_height=page.rect.height
         )
-        
+
         char_index = 0
-        line_index = 0
+        current_line = None
+        line_chars = []
         full_text_parts = []
-        
-        # Extract characters from blocks
-        for block in text_dict.get("blocks", []):
-            if block.get("type") == 0:  # Text block
-                for line in block.get("lines", []):
-                    line_chars = []
-                    
-                    for span in line.get("spans", []):
-                        text = span.get("text", "")
-                        origin = span.get("origin", (0, 0))
-                        bbox = span.get("bbox", (0, 0, 0, 0))
-                        font_size = span.get("size", 12)
-                        
-                        # Extract individual characters
-                        for i, char in enumerate(text):
-                            # Estimate character position within span
-                            char_width = (bbox[2] - bbox[0]) / len(text) if text else 0
-                            char_x = bbox[0] + i * char_width
-                            char_y = bbox[1]
-                            char_height = bbox[3] - bbox[1]
-                            
-                            char_data = CharacterData(
-                                char=char,
-                                x=char_x,
-                                y=char_y,
-                                width=char_width,
-                                height=char_height,
-                                font_size=font_size,
-                                index=char_index,
-                                line_index=line_index
-                            )
-                            
-                            page_data.characters.append(char_data)
-                            line_chars.append(char)
-                            char_index += 1
-                    
+
+        for w in words:
+            x0, y0, x1, y1, word_text, block_no, line_no, word_no = w
+            char_w = x1 - x0
+            char_h = y1 - y0
+
+            # Each "word" may be one or more chars (for CJK: usually 1 char each)
+            for i, ch in enumerate(str(word_text)):
+                # Proportionally distribute character position within the word bbox
+                char_count = len(str(word_text))
+                if char_count > 1:
+                    frac = i / char_count
+                    cx = x0 + frac * char_w
+                else:
+                    cx = x0
+
+                # Start new line group when line_no changes
+                if current_line is None or line_no != current_line:
                     if line_chars:
                         full_text_parts.append(''.join(line_chars))
-                        line_index += 1
-        
+                    line_chars = []
+                    current_line = line_no
+
+                char_data = CharacterData(
+                    char=ch,
+                    x=cx,
+                    y=y0,
+                    width=char_w / max(char_count, 1),
+                    height=char_h,
+                    font_size=char_h,
+                    index=char_index,
+                    line_index=line_no
+                )
+                page_data.characters.append(char_data)
+                line_chars.append(ch)
+                char_index += 1
+
+        if line_chars:
+            full_text_parts.append(''.join(line_chars))
+
         page_data.full_text = '\n'.join(full_text_parts)
-        
+
         # Detect reading order
         page_data.reading_order = self._detect_reading_order(page_data.characters)
-        
+
         # Sort characters by reading order
         if page_data.characters:
             page_data.characters = self._sort_characters_by_reading_order(
                 page_data.characters,
                 page_data.reading_order
             )
-            
+
             # Rebuild full text based on sorted characters
             if page_data.reading_order == "vertical":
-                # For vertical text, rebuild text in correct reading order
                 page_data.full_text = ''.join([c.char for c in page_data.characters])
-        
+
         return page_data
     
     def _combine_double_page_text(

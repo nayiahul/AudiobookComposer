@@ -117,22 +117,28 @@ class SubtitleParser:
             # Sometimes index might be missing or malformed
             index = 0
         
-        # Parse timing line
+        # Parse timing line — accepts 3-5 digit milliseconds
         timing_line = lines[1].strip()
         timing_match = re.match(
-            r'(\d{2}):(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[,.](\d{3})',
+            r'(\d{2}):(\d{2}):(\d{2})[,.](\d{3,5})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[,.](\d{3,5})',
             timing_line
         )
-        
+
         if not timing_match:
             if self.debug:
                 print(f"Warning: Invalid timing format: {timing_line}")
             return None
-        
+
         # Extract timing components
-        start_h, start_m, start_s, start_ms = map(int, timing_match.groups()[:4])
-        end_h, end_m, end_s, end_ms = map(int, timing_match.groups()[4:])
-        
+        start_h, start_m, start_s = map(int, timing_match.groups()[:3])
+        end_h, end_m, end_s = map(int, timing_match.groups()[4:7])
+
+        # Normalize millisecond strings to 3 digits (take first 3 chars)
+        start_ms_str = timing_match.group(4)
+        end_ms_str = timing_match.group(8)
+        start_ms = int(start_ms_str[:3].ljust(3, '0'))
+        end_ms = int(end_ms_str[:3].ljust(3, '0'))
+
         # Convert to seconds
         start_time = start_h * 3600 + start_m * 60 + start_s + start_ms / 1000.0
         end_time = end_h * 3600 + end_m * 60 + end_s + end_ms / 1000.0

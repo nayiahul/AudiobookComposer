@@ -18,21 +18,25 @@ Usage:
 """
 
 import argparse
+import io
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
 from typing import List, Optional, Dict, Tuple
 import fitz  # PyMuPDF
+from PIL import Image
 
 # Import highlight functionality modules (Phase 2 integration)
 try:
-    from pdf_text_extractor import PDFTextExtractor
+    from pdf_text_extractor import PDFTextExtractor, PageTextData
     from subtitle_parser import SubtitleParser
     from text_mapping_engine import TextMappingEngine
     from highlight_renderer import HighlightRenderer, HighlightConfig
     from video_composition_coordinator import VideoCompositionCoordinator, VideoConfig
+    from indicator_renderer import IndicatorRenderer, IndicatorConfig
     HIGHLIGHT_AVAILABLE = True
 except ImportError as e:
     print(f"Warning: Highlight functionality not available: {e}")
@@ -284,12 +288,6 @@ def convert_pdf_to_images(pdf_path: str, temp_dir: str, start_page: int = 1, end
                     combined_img.save(output_path)
                     image_paths.append(output_path)
                     print(f"Combined pages {page_num1 + 1} and {page_num2 + 1} into image {seq_num}")
-
-                    # Extract text data if needed (use PIL image for combined pixmap)
-                    if extract_text_data:
-                        combined_pix = fitz.Pixmap(fitz.csRGB, combined_width, combined_height)
-                        combined_pix.samples = combined_img.tobytes('raw', 'RGB')
-                        text_data_list.append(_extract_page_text(combined_pix, seq_num, 'vertical'))
                 else:
                     # Only one page left, save it as is
                     seq_num = (i // 2) + 1  # Sequential numbering starting from 1
@@ -388,7 +386,8 @@ def convert_pdf_to_images(pdf_path: str, temp_dir: str, start_page: int = 1, end
                 text_data = extractor.extract_text_with_coordinates(
                     pdf_path=pdf_path,
                     page_range=(start_page, end_page if end_page else total_pages),
-                    vertical_layout=vertical_layout
+                    vertical_layout=vertical_layout,
+                    odd_right_even_left=odd_right_even_left
                 )
                 print(f"Text data extracted: {len(text_data)} pages")
             except Exception as e:
@@ -522,7 +521,243 @@ def create_highlighted_video_frames(
         return image_paths
 
 
-def create_silent_video(audio_path: str, image_paths: List[str], temp_dir: str, transition_effect: str = 'none') -> str:
+def create_indicator_video_frames(
+    image_paths: List[str],
+    subtitle_path: str,
+    audio_path: str,
+    text_data: List,
+    temp_dir: str,
+    indicator_config: Optional[IndicatorConfig] = None,
+) -> Tuple[List[str], Optional[List[float]]]:
+    """
+    Create indicator-based video frames — one image per subtitle segment
+    with a position indicator line drawn at the current text location.
+
+    Returns:
+        Tuple of (image_paths, durations) where durations[i] is the
+        display time in seconds for image_paths[i].
+        Returns (image_paths, None) on failure.
+    """
+    if not HIGHLIGHT_AVAILABLE:
+        print("Warning: Indicator functionality not available, using original images")
+        return image_paths, None
+
+    if not text_data:
+        print("Warning: No text data available, using original images")
+        return image_paths, None
+
+    try:
+        print("Creating indicator video frames...")
+
+        parser = SubtitleParser()
+        subtitles = parser.parse_srt(subtitle_path)
+        print(f"Parsed {len(subtitles)} subtitle segments")
+
+        mapper = TextMappingEngine()
+        mappings = mapper.map_subtitles_to_text(
+            subtitles=subtitles,
+            pages_text=text_data,
+            fuzzy_match=True,
+        )
+        print(f"Mapped {len(mappings)} subtitle segments to text")
+
+        renderer = IndicatorRenderer(config=indicator_config)
+        indicator_dir = os.path.join(temp_dir, "indicator")
+        os.makedirs(indicator_dir, exist_ok=True)
+
+        frames = renderer.render_indicator_frames(
+            image_paths=image_paths,
+            subtitles=subtitles,
+            mappings=mappings,
+            text_data=text_data,
+            output_dir=indicator_dir,
+        )
+
+        if not frames:
+            print("Warning: No indicator frames generated, using original images")
+            return image_paths, None
+
+        indicator_paths = [p for p, _ in frames]
+        durations = [d for _, d in frames]
+
+        print(f"Created {len(indicator_paths)} indicator frames")
+        return indicator_paths, durations
+
+    except Exception as e:
+        print(f"Warning: Failed to create indicator frames: {e}")
+        print("Falling back to original images without indicators")
+        return image_paths, None
+
+
+def create_karaoke_video_frames(
+    image_paths: List[str],
+    subtitle_path: str,
+    audio_path: str,
+    text_data: List,
+    temp_dir: str,
+    indicator_config: Optional[IndicatorConfig] = None,
+    fps: int = 12,
+) -> str:
+    """
+    Karaoke-style progressive highlight: renders per-character frames
+    and pipes them directly to ffmpeg (zero disk I/O for frames).
+
+    Returns path to silent video ready for audio merge.
+    """
+    if not HIGHLIGHT_AVAILABLE:
+        raise RuntimeError("Karaoke not available (missing dependencies)")
+
+    if not text_data:
+        raise RuntimeError("No text data for karaoke")
+
+    print(f"Creating karaoke progressive-highlight video @ {fps}fps...")
+
+    parser = SubtitleParser()
+    subtitles = parser.parse_srt(subtitle_path)
+    print(f"Parsed {len(subtitles)} subtitle segments")
+
+    mapper = TextMappingEngine()
+    mappings = mapper.map_subtitles_to_text(
+        subtitles=subtitles, pages_text=text_data, fuzzy_match=True,
+    )
+    print(f"Mapped {len(mappings)} subtitle segments to text")
+
+    renderer = IndicatorRenderer(config=indicator_config)
+
+    # Get first image to determine video dimensions
+    first_img = Image.open(image_paths[0])
+    img_w, img_h = first_img.size
+    first_img.close()
+
+    # Build lookup structures
+    map_by_idx: Dict[int, SubtitleMapping] = {m.subtitle.index: m for m in mappings}
+    char_to_page: List[Tuple[int, int]] = []
+    for td in text_data:
+        for c in td.characters:
+            char_to_page.append((td.page_number, c.index))
+    page_to_img: Dict[int, int] = {}
+    page_orders: Dict[int, str] = {}
+    page_data_map: Dict[int, PageTextData] = {}
+    for idx, td in enumerate(text_data):
+        page_to_img[td.page_number] = idx
+        page_orders[td.page_number] = td.reading_order
+        page_data_map[td.page_number] = td
+
+    fg = indicator_config.color if indicator_config else (0, 180, 255, 220)
+    fill_color = (fg[0], fg[1], fg[2], min(fg[3], 120))
+
+    silent_path = os.path.join(temp_dir, "karaoke_silent.mp4")
+
+    # Pipe PNG-encoded frames via image2pipe — ffmpeg decodes each PNG
+    cmd = [
+        'ffmpeg', '-y',
+        '-f', 'image2pipe',
+        '-vcodec', 'png',
+        '-r', str(fps),
+        '-i', '-',
+        '-vf', 'pad=ceil(iw/2)*2:ceil(ih/2)*2',
+        '-c:v', 'libx264',
+        '-pix_fmt', 'yuv420p',
+        '-preset', 'fast',
+        '-crf', '23',
+        silent_path,
+    ]
+
+    err_log = os.path.join(temp_dir, "ffmpeg_karaoke_err.txt")
+    err_fh = open(err_log, 'w')
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=err_fh)
+
+    frame_idx = 0
+    current_base = image_paths[0]
+    image_cache: Dict[str, Image.Image] = {}
+
+    def get_base(path):
+        if path not in image_cache:
+            image_cache[path] = Image.open(path).convert('RGBA')
+        return image_cache[path].copy()
+
+    # Cache: (page_path, subtitle_text) → PNG bytes for unmapped/non-highlight frames
+    subtitle_frame_cache: Dict[Tuple[str, str], bytes] = {}
+
+    try:
+        for si, sub in enumerate(subtitles):
+            m = map_by_idx.get(sub.index)
+            duration = sub.end_time - sub.start_time
+            n_frames = max(1, int(duration * fps))
+
+            if m is not None:
+                img_idx = page_to_img.get(m.page_number)
+                if img_idx is not None and 0 <= img_idx < len(image_paths):
+                    current_base = image_paths[img_idx]
+                    order = page_orders.get(m.page_number, 'horizontal')
+                    coords = renderer._get_char_coords(m, char_to_page, page_data_map)
+
+                    for f in range(n_frames):
+                        progress = (f + 1) / n_frames
+                        frame = renderer._make_karaoke_frame(
+                            get_base(current_base), coords, progress,
+                            sub.text, fill_color,
+                        )
+                        frame.save(proc.stdin, 'PNG')
+                        frame_idx += 1
+                else:
+                    cache_key = (current_base, sub.text)
+                    if cache_key not in subtitle_frame_cache:
+                        frame = renderer._make_subtitle_frame(
+                            get_base(current_base), sub.text,
+                        )
+                        buf = io.BytesIO()
+                        frame.save(buf, 'PNG')
+                        subtitle_frame_cache[cache_key] = buf.getvalue()
+                    data = subtitle_frame_cache[cache_key]
+                    for _ in range(n_frames):
+                        proc.stdin.write(data)
+                        frame_idx += 1
+            else:
+                cache_key = (current_base, sub.text)
+                if cache_key not in subtitle_frame_cache:
+                    frame = renderer._make_subtitle_frame(
+                        get_base(current_base), sub.text,
+                    )
+                    buf = io.BytesIO()
+                    frame.save(buf, 'PNG')
+                    subtitle_frame_cache[cache_key] = buf.getvalue()
+                data = subtitle_frame_cache[cache_key]
+                for _ in range(n_frames):
+                    proc.stdin.write(data)
+                    frame_idx += 1
+
+            if (si + 1) % 50 == 0:
+                print(f"  Karaoke: {si+1}/{len(subtitles)} subs, {frame_idx} frames piped")
+
+    except BrokenPipeError:
+        proc.wait()
+        err_fh.close()
+        with open(err_log) as f:
+            err_text = f.read()
+        print(f"ffmpeg pipe error (exit {proc.returncode}):")
+        print(err_text[:2000])
+        raise RuntimeError(f"ffmpeg pipe broke: {err_text[:300]}")
+
+    proc.stdin.close()
+    proc.wait()
+    err_fh.close()
+
+    if proc.returncode != 0:
+        with open(err_log) as f:
+            err_text = f.read()
+        print(f"ffmpeg error (exit {proc.returncode}):")
+        print(err_text[:2000])
+        raise RuntimeError(f"ffmpeg encoding failed")
+
+    for img in image_cache.values():
+        img.close()
+
+    print(f"  Karaoke: {frame_idx} frames @ {fps}fps → {silent_path}")
+    return silent_path
+
+
+def create_silent_video(audio_path: str, image_paths: List[str], temp_dir: str, transition_effect: str = 'none', image_durations: Optional[List[float]] = None) -> str:
     """
     Create silent video from image sequence, duration matched to audio.
 
@@ -531,6 +766,8 @@ def create_silent_video(audio_path: str, image_paths: List[str], temp_dir: str, 
         image_paths: List of image file paths
         temp_dir: Temporary directory for output video
         transition_effect: Transition effect between pages ('none', 'fade', 'slide', 'flip')
+        image_durations: Optional per-image durations in seconds. When provided,
+                         overrides uniform duration calculation.
 
     Returns:
         Path to generated silent video
@@ -539,11 +776,11 @@ def create_silent_video(audio_path: str, image_paths: List[str], temp_dir: str, 
         RuntimeError: If video creation fails
     """
     print("Creating silent video from images")
-    
+
     # Verify input files exist
     if not os.path.exists(audio_path):
         raise RuntimeError(f"Audio file not found: {audio_path}")
-    
+
     # Check all image files exist
     for i, img_path in enumerate(image_paths):
         if not os.path.exists(img_path):
@@ -559,8 +796,24 @@ def create_silent_video(audio_path: str, image_paths: List[str], temp_dir: str, 
     if num_pages == 0:
         raise RuntimeError("No images found for video creation")
 
-    duration_per_page = audio_duration / num_pages
-    framerate = 1.0 / duration_per_page
+    if image_durations:
+        # Per-image durations provided — use them directly
+        if len(image_durations) != num_pages:
+            raise RuntimeError(
+                f"image_durations length ({len(image_durations)}) != image_paths length ({num_pages})"
+            )
+        durations = image_durations
+        # Adjust to match audio duration
+        total_dur = sum(durations)
+        if total_dur > 0 and abs(total_dur - audio_duration) > 0.5:
+            scale = audio_duration / total_dur
+            durations = [d * scale for d in durations]
+        duration_per_page = total_dur / num_pages if num_pages > 0 else 0
+    else:
+        duration_per_page = audio_duration / num_pages
+        durations = [duration_per_page] * num_pages
+
+    framerate = 1.0 / duration_per_page if duration_per_page > 0 else 1.0
 
     print(f"Pages: {num_pages}, Duration per page: {duration_per_page:.2f}s, Framerate: {framerate:.3f}")
     print(f"Transition effect: {transition_effect}")
@@ -574,11 +827,9 @@ def create_silent_video(audio_path: str, image_paths: List[str], temp_dir: str, 
         concat_file_path = os.path.join(temp_dir, "concat.txt")
         with open(concat_file_path, 'w') as f:
             for i, image_path in enumerate(image_paths):
-                # Each image is displayed for duration_per_page seconds
                 f.write(f"file '{image_path}'\n")
-                # Don't add duration for the last image
                 if i < len(image_paths) - 1:
-                    f.write(f"duration {duration_per_page}\n")
+                    f.write(f"duration {durations[i]}\n")
 
         cmd = [
             'ffmpeg',
@@ -597,11 +848,9 @@ def create_silent_video(audio_path: str, image_paths: List[str], temp_dir: str, 
         concat_file_path = os.path.join(temp_dir, "concat.txt")
         with open(concat_file_path, 'w') as f:
             for i, image_path in enumerate(image_paths):
-                # Each image is displayed for duration_per_page seconds
                 f.write(f"file '{image_path}'\n")
-                # Don't add duration for the last image
                 if i < len(image_paths) - 1:
-                    f.write(f"duration {duration_per_page}\n")
+                    f.write(f"duration {durations[i]}\n")
 
         # Apply transition effects
         if transition_effect == 'fade':
@@ -1069,9 +1318,11 @@ Examples:
     parser.add_argument('--odd-right-even-left', action='store_true', help='Use odd pages on right and even pages on left layout (for traditional Chinese books)')
     # Highlight functionality options (Phase 2)
     parser.add_argument('--enable-highlight', action='store_true', help='Enable real-time subtitle tracking with text highlighting')
-    parser.add_argument('--highlight-color', default='255,255,0,100', help='Highlight color in RGBA format (default: 255,255,0,100 - yellow with transparency)')
+    parser.add_argument('--highlight-color', default='0,200,255,220', help='Indicator color in RGBA format (default: 0,200,255,220 - bright cyan-blue)')
     parser.add_argument('--highlight-style', choices=['background', 'underline', 'box'], default='background', help='Highlight style (default: background)')
     parser.add_argument('--highlight-padding', type=int, default=3, help='Highlight padding in pixels (default: 3)')
+    parser.add_argument('--karaoke', action='store_true', help='Karaoke-style progressive character-by-character highlighting')
+    parser.add_argument('--karaoke-fps', type=int, default=12, help='FPS for karaoke rendering (default: 12)')
 
     args = parser.parse_args()
 
@@ -1116,43 +1367,59 @@ Examples:
             else:
                 print(f"❌ Image {i+1} not found: {img_path}")
         
-        # Create highlighted frames if enabled
+        # Create highlight/indicator/karaoke frames if enabled
+        image_durations = None
+        karaoke_silent_path = None
         if args.enable_highlight and HIGHLIGHT_AVAILABLE and text_data:
-            print("Highlight functionality enabled")
-            # Parse highlight color
             try:
                 color_parts = [int(x.strip()) for x in args.highlight_color.split(',')]
                 if len(color_parts) != 4:
                     raise ValueError("Color must have 4 components (RGBA)")
-                highlight_color = tuple(color_parts)
+                indicator_color = tuple(color_parts)
             except Exception as e:
-                print(f"Warning: Invalid highlight color format: {e}, using default")
-                highlight_color = (255, 255, 0, 100)
-            
-            highlight_config = HighlightConfig(
-                color=highlight_color,
-                style=args.highlight_style,
-                padding=args.highlight_padding,
-                transition_duration=0.2
+                print(f"Warning: Invalid indicator color format: {e}, using default")
+                indicator_color = (0, 200, 255, 220)
+
+            indicator_config = IndicatorConfig(
+                color=indicator_color,
+                line_width=8,
+                padding=10,
+                bar_length_ratio=0.9,
             )
-            
-            image_paths = create_highlighted_video_frames(
-                image_paths=image_paths,
-                subtitle_path=args.subs,
-                audio_path=args.audio,
-                text_data=text_data,
-                temp_dir=temp_dir,
-                highlight_config=highlight_config,
-                vertical_layout=args.vertical
-            )
+
+            if args.karaoke:
+                print("Karaoke mode enabled — progressive character highlighting")
+                karaoke_silent_path = create_karaoke_video_frames(
+                    image_paths=image_paths,
+                    subtitle_path=args.subs,
+                    audio_path=args.audio,
+                    text_data=text_data,
+                    temp_dir=temp_dir,
+                    indicator_config=indicator_config,
+                    fps=args.karaoke_fps,
+                )
+            else:
+                print("Indicator mode enabled — rendering position indicator frames")
+                image_paths, image_durations = create_indicator_video_frames(
+                    image_paths=image_paths,
+                    subtitle_path=args.subs,
+                    audio_path=args.audio,
+                    text_data=text_data,
+                    temp_dir=temp_dir,
+                    indicator_config=indicator_config,
+                )
         elif args.enable_highlight and not HIGHLIGHT_AVAILABLE:
             print("Warning: Highlight functionality requested but not available (missing dependencies)")
         elif args.enable_highlight and not text_data:
             print("Warning: Highlight functionality requested but text extraction failed")
 
-        # Step 2: Create silent video
-        silent_video_path = create_silent_video(args.audio, image_paths, temp_dir)
-        
+        # Step 2: Create silent video (or use karaoke silent video)
+        if karaoke_silent_path:
+            silent_video_path = karaoke_silent_path
+            print(f"Karaoke silent video: {silent_video_path}")
+        else:
+            silent_video_path = create_silent_video(args.audio, image_paths, temp_dir, image_durations=image_durations)
+
         # Debug: Check if silent video was created
         if os.path.exists(silent_video_path):
             size = os.path.getsize(silent_video_path)
@@ -1162,7 +1429,7 @@ Examples:
 
         # Step 3: Merge audio
         video_with_audio_path = merge_audio_video(silent_video_path, args.audio, temp_dir)
-        
+
         # Debug: Check if video with audio was created
         if os.path.exists(video_with_audio_path):
             size = os.path.getsize(video_with_audio_path)
@@ -1170,10 +1437,10 @@ Examples:
         else:
             print(f"❌ Video with audio not created: {video_with_audio_path}")
 
-        # Step 4: Burn subtitles with quality settings
-        final_video_path = burn_subtitles(video_with_audio_path, args.subs, args.output, 
-                                        quality_preset=args.quality, 
-                                        target_bitrate=args.bitrate, 
+        # Step 4: Burn subtitles (indicator + SRT together for visibility)
+        final_video_path = burn_subtitles(video_with_audio_path, args.subs, args.output,
+                                        quality_preset=args.quality,
+                                        target_bitrate=args.bitrate,
                                         resolution=getattr(args, 'resolution', None))
 
         # Debug: Check final video

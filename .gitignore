@@ -11,6 +11,13 @@ outputs/
 temp/
 screenshots/
 *.mp4
+*.m4a
+*.pdf
+*.epub
+*.srt
+*.jpg
 bak/
 config.json
-电子书/*/配置信息/config.json
+电子书/
+00001.jpg
+00002.jpg
